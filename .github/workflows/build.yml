@@ -1,0 +1,94 @@
+name: Build Chihiro-Tools
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Linux (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev
+
+      - name: Compile each tool
+        shell: bash
+        run: |
+          set -x
+          mkdir -p dist
+          failures=0
+          for src in *.c; do
+            name="${src%.c}"
+            echo "== Building $src =="
+            if [ "$name" = "decrypt" ]; then
+              # decrypt.c needs OpenSSL's DES implementation on modern systems
+              # (the non-OpenSSL path uses the long-gone Sun RPC des_crypt.h)
+              gcc -O2 -DOPENSSL -o "dist/$name" "$src" -lssl -lcrypto \
+                || { echo "FAILED: $src"; failures=$((failures+1)); }
+            else
+              gcc -O2 -o "dist/$name" "$src" \
+                || { echo "FAILED: $src"; failures=$((failures+1)); }
+            fi
+          done
+          echo "Failed builds: $failures"
+          ls -la dist || true
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: chihiro-tools-linux
+          path: dist/
+          if-no-files-found: warn
+
+  build-windows-msys2:
+    name: Windows (MSYS2)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: true
+          install: >-
+            base-devel
+            gcc
+            openssl-devel
+
+      - name: Compile each tool
+        run: |
+          set -x
+          mkdir -p dist
+          failures=0
+          for src in *.c; do
+            name="${src%.c}"
+            echo "== Building $src =="
+            if [ "$name" = "decrypt" ]; then
+              gcc -O2 -DOPENSSL -o "dist/$name.exe" "$src" -lssl -lcrypto \
+                || { echo "FAILED: $src"; failures=$((failures+1)); }
+            else
+              gcc -O2 -o "dist/$name.exe" "$src" \
+                || { echo "FAILED: $src"; failures=$((failures+1)); }
+            fi
+          done
+          echo "Failed builds: $failures"
+          ls -la dist || true
+
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: chihiro-tools-windows-msys2
+          path: dist/
+          if-no-files-found: warn
